@@ -1,0 +1,105 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+"""
+Script to run pycodestyle and pyflakes via git's pre-commit hook
+Based on https://github.com/lbolla/dotfiles/blob/master/githooks/pre-commit
+Modified by Martin Gaitán <mgaitan@machinalis.com> for Machinalis (www.machinalis.com)
+Install:
+Copy it as REPO/.git/hooks/pre-commit given execution permission
+Usage:
+    Just commit your changes as usual.
+    When python files were modified, it run pycodestyle and pyflakes.
+    If no errors, the commit is done, else it exist given
+    useful output
+    To skip the hook and force the commit add -n:
+    $ git commit -n
+"""
+
+import os
+import subprocess
+import sys
+
+MAX_LINE_LENGHT = 120
+AUTO_ADD_STAGED_MODIFIED = True
+
+devnull = open(os.devnull, 'w')
+
+
+def call(cmd, cwd=None):
+    p = subprocess.Popen(cmd.split(),
+                         stdout=subprocess.PIPE,
+                         stderr=subprocess.PIPE,
+                         cwd=cwd)
+    out, err = p.communicate()
+    return out.decode('utf-8'), err.decode('utf-8'), p.returncode
+
+
+def execute(cmd, silent=False):
+    if silent:
+        params = {
+                'stdout': devnull,
+                'stderr': devnull,
+                }
+    else:
+        params = {}
+    retcode = subprocess.call(cmd.split(), **params)
+    return retcode
+
+
+def exists(cmd):
+    return execute('which %s' % cmd, silent=True) == 0
+
+
+def get_staged(ext, auto_add=True):
+    out, _, _ = call('git diff --name-only --staged --diff-filter=d')
+    staged = set(out.splitlines())
+    if auto_add:
+        out, _, _ = call('git diff --name-only --diff-filter=d')
+        staged_modified = set(out.splitlines()).intersection(staged)
+        for filename in staged_modified:
+             call('git add %s' % filename)
+    return [f for f in staged if f.endswith(ext)]
+
+
+def output(prg, out, err):
+    print(' * %s:\n%s\n%s' % (prg, out, err))
+
+
+def die(msg):
+    print(msg)
+    sys.exit(1)
+
+
+def check_python():
+    has_pycodestyle = exists('pycodestyle')
+    has_pyflakes = exists('pyflakes')
+    if not (has_pycodestyle or has_pyflakes):
+        die('Install pycodestyle and PyFlakes!')
+
+    staged = get_staged('py', AUTO_ADD_STAGED_MODIFIED)
+    if not staged:
+        return
+
+    rrcode = 0
+    for filename in staged:
+        out, err, _ = call(
+            'pycodestyle --ignore=E121,E123,E126,E226,E24,E704,W503,W504,E501 --max-line-length=%d %s' %
+            (MAX_LINE_LENGHT, filename)
+        )
+        if out or err:
+            output('pycodestyle', out, err)
+            rrcode = rrcode | 1
+        retcode = execute('pyflakes %s' % filename)
+        rrcode = retcode | rrcode
+
+    if rrcode != 0:
+        sys.exit(rrcode)
+
+
+def main():
+    check_python()
+
+
+if __name__ == '__main__':
+    main()
